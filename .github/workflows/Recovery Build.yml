@@ -1,4 +1,4 @@
-name: Recovery Build
+name: Samsung Recovery Build
 
 on:
   workflow_dispatch:
@@ -14,33 +14,35 @@ on:
       DEVICE_TREE_URL:
         description: 'DEVICE_TREE_URL'
         required: true
-        default: 'https://github.com/kelexine/ofox_device_tecno_kelly'
+        default: 'https://github.com'
       DEVICE_TREE_BRANCH:
         description: 'DEVICE_TREE_BRANCH'
         required: true
-        default: 'ofox-11'
+        default: 'android-11'
       DEVICE_PATH:
         description: 'DEVICE_PATH'
         required: true
-        default: 'device/tecno/kelly'
+        default: 'device/samsung/a10'
       COMMON_TREE_URL:
-        description: 'COMMON_TREE_URL (if no common tree, leave blank)'
+        description: 'COMMON_TREE_URL (Nếu không có thì ĐỂ TRỐNG)'
         required: false
+        default: ''
       COMMON_PATH:
-        description: 'COMMON_PATH (if no common tree, leave blank)'
+        description: 'COMMON_PATH (Nếu không có thì ĐỂ TRỐNG)'
         required: false
+        default: ''
       DEVICE_NAME:
         description: 'DEVICE_NAME'
         required: true
-        default: 'kelly'
+        default: 'a10'
       MAKEFILE_NAME:
         description: 'MAKEFILE_NAME'
         required: true
-        default: 'twrp_kelly'
+        default: 'tw_a10'
       BUILD_TARGET:
         description: 'BUILD_TARGET'
         required: true
-        default: 'boot'
+        default: 'recovery'
 
 jobs:
   build:
@@ -50,24 +52,22 @@ jobs:
       contents: write
     steps:
  
-    # You might want to Checkout your repo first, but not mandatory
     - name: Check Out
       uses: actions/checkout@v3
 
-    # Cleanup The Actions Workspace Using Custom Composite Run Actions
-    - name: Cleanup
+    - name: Cleanup Môi Trường
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Initialize workspace
+    - name: Khởi tạo Workspace
       run: |
-        mkdir workspace
+        mkdir -p workspace
         cd workspace
         echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
       id: pwd
 
-    - name: Prepare the build environment
+    - name: Chuẩn bị môi trường build Android
       run: |
-        sudo apt install git aria2 -y
+        sudo apt-get update && sudo apt-get install git aria2 python3 -y
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts
         sudo bash setup/android_build_env.sh
@@ -75,35 +75,36 @@ jobs:
         sudo bash setup/install_android_sdk.sh
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Sync OrangeFox sources and minimal manifest
+    - name: Đồng bộ nguồn lõi OrangeFox
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         git clone ${{ github.event.inputs.SYNC_URL }}
         cd sync
+        chmod +x orangefox_sync.sh
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Clone device tree
+    - name: Tải Device Tree của Samsung
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Clone common tree
+    - name: Tải Common Tree (Nếu cấu hình yêu cầu)
       if: |
-        github.event.inputs.COMMON_TREE_URL != null
-        && github.event.inputs.COMMON_PATH != null
+        github.event.inputs.COMMON_TREE_URL != ''
+        && github.event.inputs.COMMON_PATH != ''
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Set Swap Space
+    - name: Cài đặt Bộ nhớ đệm (Swap Space)
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 12
 
-    - name: Building recovery
+    - name: Tiến hành Biên dịch (Building Recovery)
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         set +e
@@ -114,13 +115,13 @@ jobs:
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
       continue-on-error: true
 
-    - name: Check the output directory before uploading
+    - name: Kiểm tra thư mục sản phẩm trước khi xuất
       run: |
-        ls -al ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/
+        ls -al ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/ || true
         echo
-        ls -al ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/
+        ls -al ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ || true
 
-    - name: Upload to Release
+    - name: Đẩy file thành phẩm lên mục Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
@@ -129,8 +130,8 @@ jobs:
         name: ${{ github.event.inputs.DEVICE_NAME }}-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
-          Manifest: ${{ github.event.inputs.MANIFEST_BRANCH }}
-          Device: ${{ github.event.inputs.DEVICE_NAME }}
-          Target: ${{ github.event.inputs.BUILD_TARGET }}
+          Build hoàn tất cho Samsung thiết bị: ${{ github.event.inputs.DEVICE_NAME }}
+          Manifest: OrangeFox ${{ github.event.inputs.MANIFEST_BRANCH }}
+          Target Phân vùng: ${{ github.event.inputs.BUILD_TARGET }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
