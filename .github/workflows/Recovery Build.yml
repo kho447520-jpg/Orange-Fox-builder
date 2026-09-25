@@ -1,81 +1,73 @@
-name: Samsung Recovery Build
+name: OrangeFox R12 Samsung Build
 
 on:
   workflow_dispatch:
     inputs:
       SYNC_URL:
-        description: 'SYNC_URL'
+        description: 'Đường dẫn đồng bộ OrangeFox'
         required: true
-        default: 'https://gitlab.com/OrangeFox/sync.git'
+        default: 'https://gitlab.com'
       MANIFEST_BRANCH:
-        description: 'MANIFEST_BRANCH'
+        description: 'Nhánh mã nguồn (Bắt buộc 12.1 cho R12)'
         required: true
-        default: '11.0'
+        default: '12.1'
       DEVICE_TREE_URL:
-        description: 'DEVICE_TREE_URL'
+        description: 'Link GitHub chứa Device Tree của bạn'
         required: true
         default: 'https://github.com'
       DEVICE_TREE_BRANCH:
-        description: 'DEVICE_TREE_BRANCH'
+        description: 'Nhánh của Device Tree (ví dụ: fox_12.1 hoặc android-12.1)'
         required: true
-        default: 'android-11'
+        default: 'fox_12.1'
       DEVICE_PATH:
-        description: 'DEVICE_PATH'
+        description: 'Thư mục đích đặt mã nguồn thiết bị'
         required: true
         default: 'device/samsung/a10'
-      COMMON_TREE_URL:
-        description: 'COMMON_TREE_URL (Nếu không có thì ĐỂ TRỐNG)'
-        required: false
-        default: ''
-      COMMON_PATH:
-        description: 'COMMON_PATH (Nếu không có thì ĐỂ TRỐNG)'
-        required: false
-        default: ''
       DEVICE_NAME:
-        description: 'DEVICE_NAME'
+        description: 'Mã thiết bị (Mã sản phẩm)'
         required: true
         default: 'a10'
       MAKEFILE_NAME:
-        description: 'MAKEFILE_NAME'
+        description: 'Tên tệp Makefile (Không kèm đuôi .mk)'
         required: true
         default: 'tw_a10'
       BUILD_TARGET:
-        description: 'BUILD_TARGET'
+        description: 'Phân vùng đích cần tạo thành phẩm'
         required: true
         default: 'recovery'
 
 jobs:
   build:
     if: github.event.repository.owner.id == github.event.sender.id
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
  
-    - name: Check Out
-      uses: actions/checkout@v3
+    - name: Kiểm tra mã nguồn kho lưu trữ
+      uses: actions/checkout@v4
 
-    - name: Cleanup Môi Trường
+    - name: Giải phóng và Dọn dẹp không gian máy ảo
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Khởi tạo Workspace
+    - name: Khởi tạo Thư mục Workspace
       run: |
         mkdir -p workspace
         cd workspace
         echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
       id: pwd
 
-    - name: Chuẩn bị môi trường build Android
+    - name: Cấu hình Môi trường Biên dịch Android
       run: |
         sudo apt-get update && sudo apt-get install git aria2 python3 -y
-        git clone https://gitlab.com/OrangeFox/misc/scripts
+        git clone https://gitlab.com
         cd scripts
         sudo bash setup/android_build_env.sh
         sed -i 's/cd -/cd ../g' setup/install_android_sdk.sh
         sudo bash setup/install_android_sdk.sh
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Đồng bộ nguồn lõi OrangeFox
+    - name: Đồng bộ lõi OrangeFox R12 (Nhánh 12.1)
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}
         git clone ${{ github.event.inputs.SYNC_URL }}
@@ -84,54 +76,44 @@ jobs:
         ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Tải Device Tree của Samsung
+    - name: Nạp Device Tree từ GitHub vào mã nguồn
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Tải Common Tree (Nếu cấu hình yêu cầu)
-      if: |
-        github.event.inputs.COMMON_TREE_URL != ''
-        && github.event.inputs.COMMON_PATH != ''
-      run: |
-        cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-
-    - name: Cài đặt Bộ nhớ đệm (Swap Space)
+    - name: Thiết lập Bộ nhớ đệm (Swap Space 16GB cho R12)
       uses: pierotofy/set-swap-space@master
       with:
-        swap-size-gb: 12
+        swap-size-gb: 16
 
-    - name: Tiến hành Biên dịch (Building Recovery)
+    - name: Thực hiện Tiến trình Biên dịch R12
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
+        export FOX_BUILD_TYPE=Unofficial
         set -e
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && make clean && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
       continue-on-error: true
 
-    - name: Kiểm tra thư mục sản phẩm trước khi xuất
+    - name: Kiểm tra Thư mục Thành phẩm
       run: |
-        ls -al ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/ || true
-        echo
         ls -al ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/ || true
 
-    - name: Đẩy file thành phẩm lên mục Release
-      uses: softprops/action-gh-release@v1
+    - name: Tự động Đẩy file lên mục Releases của GitHub
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*.img
           ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*.zip
-        name: ${{ github.event.inputs.DEVICE_NAME }}-${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
+        name: OrangeFox-R12-${{ github.event.inputs.DEVICE_NAME }}-${{ github.run_id }}
+        tag_name: R12-${{ github.run_id }}
         body: |
-          Build hoàn tất cho Samsung thiết bị: ${{ github.event.inputs.DEVICE_NAME }}
-          Manifest: OrangeFox ${{ github.event.inputs.MANIFEST_BRANCH }}
-          Target Phân vùng: ${{ github.event.inputs.BUILD_TARGET }}
+          Xây dựng thành công OrangeFox Recovery R12
+          - Thiết bị: ${{ github.event.inputs.DEVICE_NAME }}
+          - Nhánh lõi: OrangeFox ${{ github.event.inputs.MANIFEST_BRANCH }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
